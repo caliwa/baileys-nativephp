@@ -75,16 +75,38 @@
 
         <div class="w-full md:w-2/3">
             <div class="bg-gray-900 rounded-xl shadow-lg overflow-hidden h-[600px] flex flex-col">
-                <div class="bg-gray-800 px-4 py-3 border-b border-gray-700">
-                    <span class="text-gray-300 font-mono text-sm">Logs del Sistema</span>
+                <div class="bg-gray-800 px-4 py-3 border-b border-gray-700 flex justify-between items-center">
+                    <span class="text-gray-300 font-mono text-sm">Registro de Actividad (Logs & Mensajes)</span>
+                    <span class="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded">Auto-refresh</span>
                 </div>
-                <div class="flex-1 p-4 overflow-y-auto font-mono text-xs space-y-2">
-                    @foreach($logs as $log)
-                        <div class="flex gap-2 border-b border-gray-800 pb-1">
-                            <span class="text-gray-500">[{{ \Carbon\Carbon::parse($log->created_at)->format('H:i:s') }}]</span>
-                            <span class="text-gray-300">{{ $log->message }}</span>
+                <div class="flex-1 p-4 overflow-y-auto font-mono text-sm space-y-2">
+                    @forelse($logs as $log)
+                        <div class="flex gap-3 border-b border-gray-800 pb-2 p-2 rounded hover:bg-gray-800 transition-colors">
+                            <span class="text-gray-500 shrink-0">[{{ \Carbon\Carbon::parse($log->created_at)->format('H:i:s') }}]</span>
+                            
+                            @if($log->level === 'MESSAGE_IN')
+                                <span class="text-green-400 font-bold shrink-0">💬 {{ $log->phone ?? 'Desconocido' }}:</span>
+                                <span class="text-gray-100 break-words">{{ $log->message }}</span>
+                            @elseif($log->level === 'INFO')
+                                <span class="text-blue-400 font-bold shrink-0">[INFO]</span>
+                                <span class="text-blue-200">{{ $log->message }}</span>
+                            @elseif($log->level === 'WARN')
+                                <span class="text-yellow-400 font-bold shrink-0">[WARN]</span>
+                                <span class="text-yellow-200">{{ $log->message }}</span>
+                            @elseif($log->level === 'ERROR')
+                                <span class="text-red-500 font-bold shrink-0">[ERROR]</span>
+                                <span class="text-red-200">{{ $log->message }}</span>
+                            @elseif($log->level === 'SUCCESS')
+                                <span class="text-emerald-400 font-bold shrink-0">[SUCCESS]</span>
+                                <span class="text-emerald-200">{{ $log->message }}</span>
+                            @else
+                                <span class="text-purple-400 font-bold shrink-0">[{{ $log->level }}]</span>
+                                <span class="text-gray-300">{{ $log->message }}</span>
+                            @endif
                         </div>
-                    @endforeach
+                    @empty
+                        <div class="text-center text-gray-500 mt-10">No hay actividad reciente.</div>
+                    @endforelse
                 </div>
             </div>
         </div>

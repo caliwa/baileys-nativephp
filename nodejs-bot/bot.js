@@ -1,4 +1,4 @@
-import { makeWASocket, useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } from '@whiskeysockets/baileys';
 import sqlite3 from 'sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -17,8 +17,6 @@ function dbRun(sql, params = []) {
 }
 
 function updateStatus(status, qr = null) {
-    // CAMBIO CLAVE: Usamos INSERT OR REPLACE para asegurar que la fila ID 1 siempre exista
-    // Esto arregla el problema de que se quede en "APAGADO" aunque haya QR
     const sql = `INSERT OR REPLACE INTO whatsapp_status (id, session_id, status, qr_code, updated_at, created_at) VALUES (1, 'default', ?, ?, datetime('now'), datetime('now'))`;
     dbRun(sql, [status, qr]);
 }
@@ -47,19 +45,21 @@ async function clearSessionAndRestart() {
 async function startBot() {
     if (!fs.existsSync(AUTH_FOLDER)) {
         addLog('INFO', '✨ Iniciando sesión NUEVA.');
-        // Forzamos la creación del registro en BD inmediatamente
         updateStatus('CONNECTING', null);
     } else {
         addLog('INFO', '📂 Cargando sesión existente...');
     }
 
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
+    const { version, isLatest } = await fetchLatestBaileysVersion();
+    addLog('INFO', `📡 Usando versión de WA: v${version.join('.')}, isLatest: ${isLatest}`);
 
     const sock = makeWASocket({
+        version,
         auth: state,
         printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
-        browser: ["Native Hub", "Chrome", "1.0.0"],
+        browser: ['Ubuntu', 'Chrome', '20.0.04'],
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
     });
@@ -100,9 +100,79 @@ async function startBot() {
         if (type === 'notify') {
             for (const msg of messages) {
                 if (!msg.key.fromMe) {
-                    const phone = msg.key.remoteJid.replace('@s.whatsapp.net', '');
+                    try {
+                        const fs = await import('fs');
+                        const path = await import('path');
+                        fs.appendFileSync(path.resolve(__dirname, '../storage/logs/wa_messages.log'), JSON.stringify(msg, null, 2) + '\n\n');
+                    } catch(e) {}
+                    // Ignorar estados de WhatsApp (historias)
+                    if (msg.key.remoteJid === 'status@broadcast') continue;
+
+                    let sender = msg.key.remoteJid;
+                    if (sender?.endsWith('@g.us') && msg.key.participant) {
+                        sender = msg.key.participant;
+                    }
+
+                    // Prevención extrema: Nunca procesar mensajes propios
+                    const myId = sock.user?.id?.split(':')[0];
+                    if (myId && sender?.includes(myId)) continue;
+
+                    let uniqueId = sender?.replace(/@(s\.whatsapp\.net|c\.us|g\.us|lid)/g, '');
+                    if (uniqueId?.includes(':')) uniqueId = uniqueId.split(':')[0];
+
+                    let realPhone = null;
+
+                    // Intentar resolver @lid a número de teléfono real
+                    if (sender?.endsWith('@lid')) {
+                        try {
+                            const pnJid = await sock.signalRepository.lidMapping.getPNForLID(sender);
+                            if (pnJid) {
+                                realPhone = pnJid.replace(/@(s\.whatsapp\.net|c\.us|g\.us|lid)/g, '');
+                                if (realPhone.includes(':')) realPhone = realPhone.split(':')[0];
+                            }
+                        } catch (e) {}
+                    } else {
+                        // Si no era LID, el uniqueId ya es el teléfono real
+                        realPhone = uniqueId;
+                    }
+
+                    let displayStr = `ID: ${uniqueId}`;
+                    if (realPhone && realPhone !== uniqueId) {
+                        displayStr += ` | Tel: +${realPhone}`;
+                    } else if (realPhone) {
+                        displayStr = `+${realPhone}`;
+                    }
+
+                    if (msg.pushName) {
+                        displayStr = `${msg.pushName} (${displayStr})`;
+                    } else {
+                        displayStr = `(${displayStr})`;
+                    }
+                    
                     const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '[Media]';
-                    addLog('MESSAGE_IN', text, phone);
+                    addLog('MESSAGE_IN', text, displayStr);
+
+                    // --- RESPUESTA AUTOMÁTICA ---
+                    try {
+                        let targetJid = msg.key.remoteJid;
+
+                        // 1. Marcar mensaje como leído
+                        await sock.readMessages([msg.key]);
+                        
+                        // 2. Simular que está escribiendo
+                        await sock.sendPresenceUpdate('composing', targetJid);
+                        await new Promise(resolve => setTimeout(resolve, 1500));
+                        
+                        // 3. Enviar mensaje puro al mismo chat (la forma más segura en Baileys)
+                        await sock.sendMessage(targetJid, { text: 'TECNOLOGÍAS ALIMENTICIAS TRANSFORMACIÓN DIGITAL 2026' });
+                        
+                        // 4. Quitar el estado de escribiendo
+                        await sock.sendPresenceUpdate('paused', targetJid);
+
+                        addLog('INFO', `Respuesta enviada a ${targetJid}`);
+                    } catch (error) {
+                        addLog('ERROR', 'Error enviando respuesta: ' + error.message);
+                    }
                 }
             }
         }

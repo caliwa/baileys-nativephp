@@ -37,7 +37,7 @@ class WhatsappBot extends Component
             $this->qrCode = null;
         }
 
-        $this->logs = DB::table('whatsapp_logs')->orderBy('created_at', 'desc')->limit(15)->get();
+        $this->logs = DB::table('whatsapp_logs')->orderBy('created_at', 'desc')->limit(50)->get();
     }
 
     public function startBot()
